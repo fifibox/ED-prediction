@@ -12,25 +12,34 @@ import plotly.express as px
 def get_supabase():
     url = st.secrets["SUPABASE_URL"]
     key = st.secrets["SUPABASE_KEY"]
-    
-    # Debug: show what we're using
-    st.write(f"URL: {url}")
-    st.write(f"Key starts with: {key[:20]}...")
-    
     return create_client(url, key)
 
 @st.cache_data(ttl=300)
 def fetch_and_save():
     supabase = get_supabase()
 
-    # Test simple select first
+    # Scrape live data from WA Health
+    url = "https://www.health.wa.gov.au/Reports-and-publications/Emergency-Department-activity/Data?report=ed_activity_now"
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+    response = requests.get(url, headers=headers, timeout=10)
+    response.raise_for_status()
+
+    soup = BeautifulSoup(response.text, "html.parser")
+    table = soup.find("table")
+    df = pd.read_html(io.StringIO(str(table)))[0]
+
+    # Rename to match Supabase column names exactly
+    df.columns = ["hospital", "avg_wait_triage4_mins", "pt_waiting_to_be_seen", "total_in_ed"]
+    df["timestamp"] = datetime.now(timezone.utc).isoformat()
+
+    # Save to Supabase
+    rows = df.to_dict(orient="records")
     try:
-        test = supabase.table("ed_history").select("*").limit(1).execute()
-        st.write("✅ Basic SELECT works:", test)
+        supabase.table("ed_history").insert(rows).execute()
+        st.success(f"✅ Inserted {len(rows)} rows")
     except Exception as e:
-        st.error(f"❌ Basic SELECT failed: {e}")
-        st.stop()
-    
+        st.warning(f"Could not insert new data: {e}")
+
     # Load last 24 hours from Supabase
     cutoff = (datetime.now(timezone.utc) - pd.Timedelta(hours=24)).isoformat()
     result = supabase.table("ed_history").select("*").gte("timestamp", cutoff).execute()
