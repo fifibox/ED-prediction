@@ -3,40 +3,48 @@ import requests
 from bs4 import BeautifulSoup
 import pandas as pd
 import io
-import os
-from datetime import datetime
-import plotly.express as px
+from datetime import datetime, timezone
+from supabase import create_client
 
-HISTORY_FILE = "ed_history.csv"
+# --- Supabase client ---
+@st.cache_resource
+def get_supabase():
+    url = st.secrets["SUPABASE_URL"]
+    key = st.secrets["SUPABASE_KEY"]
+    return create_client(url, key)
 
 @st.cache_data(ttl=300)
 def fetch_and_save():
+    supabase = get_supabase()
+
+    # Scrape live data
     url = "https://www.health.wa.gov.au/Reports-and-publications/Emergency-Department-activity/Data?report=ed_activity_now"
     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
-
     response = requests.get(url, headers=headers, timeout=10)
     response.raise_for_status()
 
     soup = BeautifulSoup(response.text, "html.parser")
     table = soup.find("table")
-
     df = pd.read_html(io.StringIO(str(table)))[0]
     df.columns = ["Hospital", "Avg_Wait_Triage4_mins", "Waiting_to_be_Seen", "Total_in_ED"]
-    df["Timestamp"] = datetime.now().strftime("%Y-%m-%d %H:%M")
+    df["timestamp"] = datetime.now(timezone.utc).isoformat()
 
-    # Append to history csv file
-    if os.path.exists(HISTORY_FILE) and os.path.getsize(HISTORY_FILE) > 0:
-        history = pd.read_csv(HISTORY_FILE)
-        history = pd.concat([history, df], ignore_index=True)
-    else:
-        history = df
+    # Save to Supabase
+    rows = df.rename(columns={
+        "hospital": "hospital",
+        "avg_wait_triage4_mins": "avg_wait_triage4_mins",
+        "pt_waiting_to_be_seen": "pt_waiting_to_be_seen",
+        "total_in_ed": "total_in_ed",
+        "timestamp": "timestamp"
+    }).to_dict(orient="records")
+    supabase.table("ed_history").insert(rows).execute()
 
-    # Keep only last 24 hours
-    history["Timestamp"] = pd.to_datetime(history["Timestamp"])
-    cutoff = pd.Timestamp.now() - pd.Timedelta(hours=24)
-    history = history[history["Timestamp"] > cutoff]
+    # Load last 24 hours
+    cutoff = (datetime.now(timezone.utc) - pd.Timedelta(hours=24)).isoformat()
+    result = supabase.table("ed_history").select("*").gte("timestamp", cutoff).execute()
+    history = pd.DataFrame(result.data)
+    history["timestamp"] = pd.to_datetime(history["timestamp"])
 
-    history.to_csv(HISTORY_FILE, index=False)
     return history
 
 
@@ -45,30 +53,24 @@ st.title("🚨 WA ED — 24 Hour Wait Time Trend")
 
 history = fetch_and_save()
 
-if len(history["Timestamp"].unique()) < 2:
-    st.warning("⏳ Not enough data yet — the chart will fill in as data is collected every 5 minutes. Leave the app running!")
+if history.empty or len(history["timestamp"].unique()) < 2:
+    st.warning("⏳ Not enough data yet — check back in a few minutes!")
 else:
-    # Hospital filter
-    hospitals = sorted(history["Hospital"].unique())
+    hospitals = sorted(history["hospital"].unique())
     selected = st.multiselect("Select hospitals", hospitals, default=hospitals)
+    filtered = history[history["hospital"].isin(selected)]
 
-    filtered = history[history["Hospital"].isin(selected)]
-
+    import plotly.express as px
     fig = px.line(
         filtered,
-        x="Timestamp",
-        y="Avg_Wait_Triage4_mins",
-        color="Hospital",
+        x="timestamp",
+        y="avg_wait_triage4_mins",
+        color="hospital",
         markers=True,
-        labels={"Avg_Wait_Triage4_mins": "Avg Wait (mins)", "Timestamp": "Time"},
+        labels={"avg_wait_triage4_mins": "Avg Wait (mins)", "timestamp": "Time"},
         title="Triage 4 Average Wait Time — Last 24 Hours"
     )
-    fig.update_layout(
-        xaxis_title="Time",
-        yaxis_title="Wait Time (minutes)",
-        legend_title="Hospital",
-        hovermode="x unified"
-    )
+    fig.update_layout(hovermode="x unified")
     st.plotly_chart(fig, use_container_width=True)
 
-st.caption(f"🔄 Auto-refreshes every 5 minutes | Data saved to `{HISTORY_FILE}`")
+st.caption("🔄 Auto-refreshes every 5 minutes")
