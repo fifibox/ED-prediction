@@ -5,6 +5,7 @@ import pandas as pd
 import io
 from datetime import datetime, timezone
 from supabase import create_client
+import plotly.express as px
 
 # --- Supabase client ---
 @st.cache_resource
@@ -26,17 +27,13 @@ def fetch_and_save():
     soup = BeautifulSoup(response.text, "html.parser")
     table = soup.find("table")
     df = pd.read_html(io.StringIO(str(table)))[0]
-    df.columns = ["Hospital", "Avg_Wait_Triage4_mins", "Waiting_to_be_Seen", "Total_in_ED"]
+
+    # Rename to match Supabase column names exactly
+    df.columns = ["hospital", "avg_wait_triage4_mins", "waiting_to_be_seen", "total_in_ed"]
     df["timestamp"] = datetime.now(timezone.utc).isoformat()
 
     # Save to Supabase
-    rows = df.rename(columns={
-        "hospital": "hospital",
-        "avg_wait_triage4_mins": "avg_wait_triage4_mins",
-        "pt_waiting_to_be_seen": "pt_waiting_to_be_seen",
-        "total_in_ed": "total_in_ed",
-        "timestamp": "timestamp"
-    }).to_dict(orient="records")
+    rows = df.to_dict(orient="records")
     supabase.table("ed_history").insert(rows).execute()
 
     # Load last 24 hours
@@ -46,7 +43,6 @@ def fetch_and_save():
     history["timestamp"] = pd.to_datetime(history["timestamp"])
 
     return history
-
 
 # --- Streamlit App ---
 st.title("🚨 WA ED — 24 Hour Wait Time Trend")
@@ -60,7 +56,6 @@ else:
     selected = st.multiselect("Select hospitals", hospitals, default=hospitals)
     filtered = history[history["hospital"].isin(selected)]
 
-    import plotly.express as px
     fig = px.line(
         filtered,
         x="timestamp",
@@ -74,3 +69,4 @@ else:
     st.plotly_chart(fig, use_container_width=True)
 
 st.caption("🔄 Auto-refreshes every 5 minutes")
+
