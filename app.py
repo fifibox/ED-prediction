@@ -18,29 +18,13 @@ def get_supabase():
 def fetch_and_save():
     supabase = get_supabase()
 
-    # Scrape live data
-    url = "https://www.health.wa.gov.au/Reports-and-publications/Emergency-Department-activity/Data?report=ed_activity_now"
-    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
-    response = requests.get(url, headers=headers, timeout=10)
-    response.raise_for_status()
-
-    soup = BeautifulSoup(response.text, "html.parser")
-    table = soup.find("table")
-    df = pd.read_html(io.StringIO(str(table)))[0]
-
-    # Rename to match Supabase column names exactly
-    df.columns = ["hospital", "avg_wait_triage4_mins", "waiting_to_be_seen", "total_in_ed"]
-    df["timestamp"] = datetime.now(timezone.utc).isoformat()
-
-    # Save to Supabase
-    rows = df.to_dict(orient="records")
-    supabase.table("ed_history").insert(rows).execute()
-
-    # Load last 24 hours
+    # Load last 24 hours from Supabase
     cutoff = (datetime.now(timezone.utc) - pd.Timedelta(hours=24)).isoformat()
     result = supabase.table("ed_history").select("*").gte("timestamp", cutoff).execute()
     history = pd.DataFrame(result.data)
-    history["timestamp"] = pd.to_datetime(history["timestamp"])
+    
+    if not history.empty:
+        history["timestamp"] = pd.to_datetime(history["timestamp"])
 
     return history
 
