@@ -24,8 +24,8 @@ def fetch_and_save():
     df.columns = ["Hospital", "Avg_Wait_Triage4_mins", "Waiting_to_be_Seen", "Total_in_ED"]
     df["Timestamp"] = datetime.now().strftime("%Y-%m-%d %H:%M")
 
-    # Append to history file
-    if os.path.exists(HISTORY_FILE):
+    # Append to history csv file
+    if os.path.exists(HISTORY_FILE) and os.path.getsize(HISTORY_FILE) > 0:
         history = pd.read_csv(HISTORY_FILE)
         history = pd.concat([history, df], ignore_index=True)
     else:
