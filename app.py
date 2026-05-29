@@ -12,12 +12,25 @@ import plotly.express as px
 def get_supabase():
     url = st.secrets["SUPABASE_URL"]
     key = st.secrets["SUPABASE_KEY"]
+    
+    # Debug: show what we're using
+    st.write(f"URL: {url}")
+    st.write(f"Key starts with: {key[:20]}...")
+    
     return create_client(url, key)
 
 @st.cache_data(ttl=300)
 def fetch_and_save():
     supabase = get_supabase()
 
+    # Test simple select first
+    try:
+        test = supabase.table("ed_history").select("*").limit(1).execute()
+        st.write("✅ Basic SELECT works:", test)
+    except Exception as e:
+        st.error(f"❌ Basic SELECT failed: {e}")
+        st.stop()
+    
     # Load last 24 hours from Supabase
     cutoff = (datetime.now(timezone.utc) - pd.Timedelta(hours=24)).isoformat()
     result = supabase.table("ed_history").select("*").gte("timestamp", cutoff).execute()
