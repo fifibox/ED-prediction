@@ -62,6 +62,8 @@ def fetch_and_save():
     
     if not history.empty:
         history["timestamp"] = pd.to_datetime(history["timestamp"], format="ISO8601")
+        # Convert to Perth timezone for display
+        history["timestamp"] = history["timestamp"].dt.tz_convert("Australia/Perth")
 
     return history
 
