@@ -6,6 +6,7 @@ import io
 from datetime import datetime, timezone
 from supabase import create_client
 import plotly.express as px
+import pytz
 
 # --- Supabase client ---
 @st.cache_resource
@@ -14,6 +15,7 @@ def get_supabase():
     key = st.secrets["SUPABASE_KEY"]
     return create_client(url, key)
 
+# --- Data fetching every 5min -- 
 @st.cache_data(ttl=300)
 def fetch_and_save():
     supabase = get_supabase()
@@ -30,13 +32,26 @@ def fetch_and_save():
 
     # Rename to match Supabase column names exactly
     df.columns = ["hospital", "avg_wait_triage4_mins", "pt_waiting_to_be_seen", "total_in_ed"]
-    df["timestamp"] = datetime.now(timezone.utc).isoformat()
+
+    # Extract timestamp from table title
+    title_text = soup.find(string=lambda t: t and "Preview of Emergency Department" in t)
+
+    try:
+        time_str = title_text.split("at ")[-1].strip()
+        timestamp = datetime.strptime(time_str, "%A, %d %B %Y %I:%M %p")
+        perth_tz = pytz.timezone("Australia/Perth")
+        timestamp = perth_tz.localize(timestamp)
+        df["timestamp"] = timestamp.isoformat()
+    except:
+        # Fallback to current Perth time if parsing fails
+        perth_tz = pytz.timezone("Australia/Perth")
+        df["timestamp"] = datetime.now(perth_tz).isoformat()
 
     # Save to Supabase
     rows = df.to_dict(orient="records")
     try:
         supabase.table("ed_history").insert(rows).execute()
-        st.success(f"✅ Inserted {len(rows)} rows")
+        st.success(f"✅ Inserted {len(rows)} rows at {df['timestamp'].iloc[0]}")
     except Exception as e:
         st.warning(f"Could not insert new data: {e}")
 
@@ -75,4 +90,3 @@ else:
     st.plotly_chart(fig, use_container_width=True)
 
 st.caption("🔄 Auto-refreshes every 5 minutes")
-
