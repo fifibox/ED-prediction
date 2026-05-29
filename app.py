@@ -61,7 +61,7 @@ def fetch_and_save():
     history = pd.DataFrame(result.data)
     
     if not history.empty:
-        history["timestamp"] = pd.to_datetime(history["timestamp"])
+        history["timestamp"] = pd.to_datetime(history["timestamp"], format="ISO8601")
 
     return history
 
